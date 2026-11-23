@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_USER: geo
+          POSTGRES_PASSWORD: geo
+          POSTGRES_DB: geocoder_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U geo"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_pgsql, mbstring
+          coverage: none
+      - name: ogr2ogr
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gdal-bin
+      - name: Controllo sintassi
+        run: find src bin public tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Test
+        env:
+          GEOCODER_TEST_DSN: "pgsql:host=localhost;port=5432;dbname=geocoder_test"
+          GEOCODER_TEST_UTENTE: geo
+          GEOCODER_TEST_PASSWORD: geo
+        run: php tests/esegui.php

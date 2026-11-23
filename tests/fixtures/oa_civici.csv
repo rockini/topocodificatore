@@ -1,0 +1,49 @@
+LON,LAT,NUMBER,STREET,UNIT,CITY,DISTRICT,REGION,POSTCODE,ID,HASH
+9.1870000,45.4800500,1,Via Giuseppe Garibaldi,,Milano,,,20121,,h0001
+9.1873000,45.4801000,2,Via Giuseppe Garibaldi,,Milano,,,20121,,h0002
+9.1870000,45.4801500,3,Via Giuseppe Garibaldi,,Milano,,,20121,,h0003
+9.1873000,45.4802000,4,Via Giuseppe Garibaldi,,Milano,,,20121,,h0004
+9.1870000,45.4802500,5,Via Giuseppe Garibaldi,,Milano,,,20121,,h0005
+9.1873000,45.4803000,6,Via Giuseppe Garibaldi,,Milano,,,20121,,h0006
+9.1870000,45.4803500,7,Via Giuseppe Garibaldi,,Milano,,,20121,,h0007
+9.1873000,45.4804000,8,Via Giuseppe Garibaldi,,Milano,,,20121,,h0008
+9.1870000,45.4804500,9,Via Giuseppe Garibaldi,,Milano,,,20121,,h0009
+9.1873000,45.4805000,10,Via Giuseppe Garibaldi,,Milano,,,20121,,h0010
+9.1870000,45.4805500,11,Via Giuseppe Garibaldi,,Milano,,,20121,,h0011
+9.1870000,45.4806500,13,Via Giuseppe Garibaldi,,Milano,,,20121,,h0012
+9.1873000,45.4807000,14,Via Giuseppe Garibaldi,,Milano,,,20121,,h0013
+9.1870000,45.4807500,15,Via Giuseppe Garibaldi,,Milano,,,20121,,h0014
+9.1873000,45.4808000,16,Via Giuseppe Garibaldi,,Milano,,,20121,,h0015
+9.1870000,45.4808500,17,Via Giuseppe Garibaldi,,Milano,,,20121,,h0016
+9.1873000,45.4809000,18,Via Giuseppe Garibaldi,,Milano,,,20121,,h0017
+9.1870000,45.4809500,19,Via Giuseppe Garibaldi,,Milano,,,20121,,h0018
+9.1873000,45.4810000,20,Via Giuseppe Garibaldi,,Milano,,,20121,,h0019
+9.1870000,45.4810500,21,Via Giuseppe Garibaldi,,Milano,,,20121,,h0020
+9.1873000,45.4811000,22,Via Giuseppe Garibaldi,,Milano,,,20121,,h0021
+9.1870000,45.4811500,23,Via Giuseppe Garibaldi,,Milano,,,20121,,h0022
+9.1873000,45.4812000,24,Via Giuseppe Garibaldi,,Milano,,,20121,,h0023
+9.1870000,45.4812500,25,Via Giuseppe Garibaldi,,Milano,,,20121,,h0024
+9.1873000,45.4813000,26,Via Giuseppe Garibaldi,,Milano,,,20121,,h0025
+9.1870000,45.4813500,27,Via Giuseppe Garibaldi,,Milano,,,20121,,h0026
+9.1873000,45.4814000,28,Via Giuseppe Garibaldi,,Milano,,,20121,,h0027
+9.1870000,45.4814500,29,Via Giuseppe Garibaldi,,Milano,,,20121,,h0028
+9.1873000,45.4815000,30,Via Giuseppe Garibaldi,,Milano,,,20121,,h0029
+9.1873000,45.4806100,12/A,Via Giuseppe Garibaldi,,Milano,,,20121,,h0030
+9.1873000,45.4820000,40,Via Giuseppe Garibaldi,,Milano,,,20121,,h0031
+9.1919000,45.4641000,1,P.zza del Duomo,,Milano,,,20122,,h0032
+9.1922000,45.4643000,2,P.zza del Duomo,,Milano,,,20122,,h0033
+9.2000000,45.4700000,5,Corso XXII Marzo,,Milano,,,20135,,h0034
+9.2003000,45.4701000,8,Corso XXII Marzo,,Milano,,,20135,,h0035
+9.1500000,45.4500000,SNC,Via Sant'Ambrogio,,Milano,,,,,h0036
+8.9400000,44.4060000,5,Via XX Settembre,,Genova,,,16121,,h0037
+8.9402000,44.4061000,7,Via XX Settembre,,Genova,,,16121,,h0038
+8.9401000,44.4059000,12r,Via XX Settembre,,Genova,,,16121,,h0039
+8.9330000,44.4080000,10,Via Roma,,Genova,CENTRO,,16121,,h0040
+8.9332000,44.4081000,12,Via Roma,,Genova,CENTRO,,16121,,h0041
+8.7500000,44.4280000,3,Via Roma,,Genova,VOLTRI,,16158,,h0042
+12.1357000,46.5405000,14,Corso Italia,,Cortina d'Ampezzo,,,32043,,h0043
+12.1360000,46.5407000,16,Corso Italia,,Cortina d'Ampezzo,,,32043,,h0044
+12.1400000,46.5300000,3,Via Roma,,Cortina d'Ampezzo,,,32043,,h0045
+9.3000000,45.6000000,1,Via Lontana,,Milano,,,,,h0046
+9.1873000,45.4825000,50,VIA GIUSEPPE GARIBALDI,INT 4,MILANO,,LOMBARDIA,20121,,h0900
+abc,,1,Via Rotta,,Milano,,,,,bad1

@@ -1,0 +1,21 @@
+{
+    "name": "rockini/topocodificatore",
+    "description": "Geocoder per l'Italia su PostgreSQL/PostGIS: civici OpenAddresses, toponimi IGM, comuni ISTAT",
+    "type": "project",
+    "require": {
+        "php": ">=8.2",
+        "ext-pdo": "*",
+        "ext-pdo_pgsql": "*",
+        "ext-json": "*",
+        "ext-mbstring": "*"
+    },
+    "autoload": {
+        "psr-4": {
+            "Topocodificatore\\": "src/"
+        },
+        "files": ["src/funzioni.php"]
+    },
+    "scripts": {
+        "test": "php tests/esegui.php"
+    }
+}

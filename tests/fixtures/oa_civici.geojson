@@ -1,0 +1,5 @@
+{"type": "Feature", "properties": {"hash": "h0001", "number": "1", "street": "Via Giuseppe Garibaldi", "unit": "", "city": "Milano", "postcode": "20121"}, "geometry": {"type": "Point", "coordinates": [9.187, 45.48005]}}
+{"type": "Feature", "properties": {"hash": "h0002", "number": "2", "street": "Via Giuseppe Garibaldi", "unit": "", "city": "Milano", "postcode": "20121"}, "geometry": {"type": "Point", "coordinates": [9.1873, 45.4801]}}
+{"type": "Feature", "properties": {"hash": "h0003", "number": "3", "street": "Via Giuseppe Garibaldi", "unit": "", "city": "Milano", "postcode": "20121"}, "geometry": {"type": "Point", "coordinates": [9.187, 45.48015]}}
+{"type": "Feature", "properties": {"hash": "h0004", "number": "4", "street": "Via Giuseppe Garibaldi", "unit": "", "city": "Milano", "postcode": "20121"}, "geometry": {"type": "Point", "coordinates": [9.1873, 45.4802]}}
+{"type": "Feature", "properties": {"hash": "h0005", "number": "5", "street": "Via Giuseppe Garibaldi", "unit": "", "city": "Milano", "postcode": "20121"}, "geometry": {"type": "Point", "coordinates": [9.187, 45.48025]}}
