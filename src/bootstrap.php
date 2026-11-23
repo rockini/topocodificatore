@@ -13,3 +13,5 @@ spl_autoload_register(static function (string $classe): void {
         require $file;
     }
 });
+
+require_once __DIR__ . '/funzioni.php';

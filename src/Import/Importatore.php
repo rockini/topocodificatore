@@ -37,8 +37,8 @@ final class Importatore
     /** Colonne canoniche di ogni dataset (oltre a geom oppure lon/lat). */
     public const DATASET = [
         'comuni' => ['istat', 'nome', 'provincia', 'regione'],
-        'civici' => ['fonte_id', 'via', 'civico', 'unita', 'comune', 'provincia', 'cap'],
-        'toponimi' => ['fonte_id', 'nome', 'tipo', 'attributi'],
+        'civici' => ['fonte_id', 'via', 'civico', 'interno', 'frazione', 'comune', 'provincia', 'cap'],
+        'toponimi' => ['fonte_id', 'nome', 'tipo', 'importanza', 'attributi'],
     ];
 
     /** Colonne obbligatorie nella mappatura. */
@@ -51,12 +51,13 @@ final class Importatore
     /** Mappatura predefinita per i file di OpenAddresses. */
     private const OPENADDRESSES = [
         'csv' => [
-            'fonte_id' => 'hash', 'via' => 'street', 'civico' => 'number', 'unita' => 'unit',
-            'comune' => 'city', 'provincia' => 'region', 'cap' => 'postcode', 'lon' => 'lon', 'lat' => 'lat',
+            'fonte_id' => 'hash', 'via' => 'street', 'civico' => 'number', 'interno' => 'unit',
+            'frazione' => 'district', 'comune' => 'city', 'provincia' => 'region', 'cap' => 'postcode',
+            'lon' => 'lon', 'lat' => 'lat',
         ],
         'geojsonl' => [
-            'fonte_id' => 'hash', 'via' => 'street', 'civico' => 'number', 'unita' => 'unit',
-            'comune' => 'city', 'provincia' => 'region', 'cap' => 'postcode',
+            'fonte_id' => 'hash', 'via' => 'street', 'civico' => 'number', 'interno' => 'unit',
+            'frazione' => 'district', 'comune' => 'city', 'provincia' => 'region', 'cap' => 'postcode',
         ],
     ];
 
@@ -83,33 +84,23 @@ final class Importatore
         if (!isset(self::DATASET[$dataset])) {
             throw new InvalidArgumentException("Dataset sconosciuto: $dataset");
         }
-        $spec = $this->config[$dataset] ?? null;
-        if (!is_array($spec)) {
+        $specs = $this->config[$dataset] ?? null;
+        if (!is_array($specs) || $specs === []) {
             throw new InvalidArgumentException("Nella configurazione manca importazione.$dataset");
         }
-        $tipo = $spec['tipo'] ?? '';
+        // Una fonte sola oppure un elenco di fonti, in ordine di priorità.
+        if (!array_is_list($specs)) {
+            $specs = [$specs];
+        }
         $iniziata = date('c');
-        ($this->log)("[$dataset] caricamento in staging (fonte: $tipo)");
-
         $this->db->exec("TRUNCATE staging.$dataset");
-        $srid = (int) ($spec['srid'] ?? 4326);
-        $sorgente = match ($tipo) {
-            'tabella' => $this->daTabella($dataset, $spec),
-            'file' => $this->daFile($dataset, $spec, $srid),
-            'pdo' => $this->daPdo($dataset, $spec),
-            'csv' => $this->daCsv($dataset, $spec),
-            'geojsonl' => $this->daGeojsonl($dataset, $spec),
-            default => throw new InvalidArgumentException("importazione.$dataset.tipo non valido: '$tipo'"),
-        };
-
-        ($this->log)("[$dataset] calcolo delle geometrie (SRID fonte $srid)");
-        $st = $this->db->prepare("UPDATE staging.$dataset SET geom = geocoder.geometria_sorgente(geom_txt, lon, lat, :srid)");
-        $st->execute(['srid' => $srid]);
+        $sorgenti = [];
+        foreach ($specs as $priorita => $spec) {
+            $sorgenti[] = $this->caricaFonte($dataset, $spec, $priorita);
+        }
+        $sorgente = implode(' + ', $sorgenti);
         $righe = (int) $this->db->query("SELECT count(*) FROM staging.$dataset")->fetchColumn();
         $senzaGeom = (int) $this->db->query("SELECT count(*) FROM staging.$dataset WHERE geom IS NULL")->fetchColumn();
-        if ($righe > 0 && $senzaGeom === $righe) {
-            throw new RuntimeException("[$dataset] nessuna geometria leggibile su $righe righe: controlla la mappatura di geom o lon/lat e lo srid");
-        }
 
         ($this->log)("[$dataset] trasformazione ($righe righe, $senzaGeom senza geometria)");
         $tabella = $dataset === 'toponimi' ? 'toponimi_igm' : $dataset;
@@ -133,6 +124,45 @@ final class Importatore
         ($this->log)("[$dataset] fatto: $importate importate, " . ($righe - $importate) . ' scartate o duplicate');
 
         return ['righe' => $righe, 'scartate' => $righe - $importate, 'importate' => $importate];
+    }
+
+    /**
+     * Carica una fonte in staging e ne calcola le geometrie.
+     *
+     * @param array<string, mixed> $spec
+     * @return string descrizione della fonte, per il registro
+     */
+    private function caricaFonte(string $dataset, array $spec, int $priorita): string
+    {
+        $tipo = $spec['tipo'] ?? '';
+        $fonte = (string) ($spec['fonte'] ?? match ($dataset) {
+            'civici' => 'openaddresses', 'toponimi' => 'igm', default => 'istat',
+        });
+        ($this->log)("[$dataset] caricamento in staging di '$fonte' (tipo $tipo)");
+        $srid = (int) ($spec['srid'] ?? 4326);
+        $descrizione = match ($tipo) {
+            'tabella' => $this->daTabella($dataset, $spec),
+            'file' => $this->daFile($dataset, $spec, $srid),
+            'pdo' => $this->daPdo($dataset, $spec),
+            'csv' => $this->daCsv($dataset, $spec),
+            'geojsonl' => $this->daGeojsonl($dataset, $spec),
+            default => throw new InvalidArgumentException("importazione.$dataset.tipo non valido: '$tipo'"),
+        };
+        $this->db->prepare("UPDATE staging.$dataset SET fonte = :f, priorita = :p WHERE priorita IS NULL")
+            ->execute(['f' => $fonte, 'p' => $priorita]);
+
+        ($this->log)("[$dataset] calcolo delle geometrie di '$fonte' (SRID fonte $srid)");
+        $st = $this->db->prepare("UPDATE staging.$dataset SET geom = geocoder.geometria_sorgente(geom_txt, lon, lat, :srid)
+                                  WHERE priorita = :p");
+        $st->execute(['srid' => $srid, 'p' => $priorita]);
+        $st = $this->db->prepare("SELECT count(*), count(geom) FROM staging.$dataset WHERE priorita = :p");
+        $st->execute(['p' => $priorita]);
+        [$righe, $conGeom] = array_map('intval', $st->fetch(PDO::FETCH_NUM));
+        if ($righe > 0 && $conGeom === 0) {
+            throw new RuntimeException("[$dataset] '$fonte': nessuna geometria leggibile su $righe righe: "
+                . 'controlla la mappatura di geom o lon/lat e lo srid');
+        }
+        return "$fonte: $descrizione";
     }
 
     /**

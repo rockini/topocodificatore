@@ -39,46 +39,75 @@ return [
             ],
         ],
 
-        // Civici OpenAddresses già caricati in una tabella dello stesso database.
-        // Le colonne sono quelle dei CSV di OpenAddresses; adattale al tuo schema.
+        // Civici: più fonti, in ordine di priorità. Quando lo stesso civico (stesso
+        // numero, via con nome simile, entro 30 m) compare in più fonti, si tiene
+        // quello della prima. Con una fonte sola basta l'array della fonte.
         'civici' => [
-            'tipo' => 'tabella',
-            'tabella' => 'public.openaddresses',     // oppure 'query' => 'SELECT ... FROM ...'
-            'filtro' => null,                        // es. "t.region = 'Lombardia'" per un import parziale
-            'srid' => 4326,
-            'colonne' => [
-                'fonte_id' => 't.hash',
-                'via' => 't.street',
-                'civico' => 't.number',
-                'unita' => 't.unit',
-                'comune' => 't.city',
-                'provincia' => 't.region',
-                'cap' => 't.postcode',
-                'lon' => 't.lon',
-                'lat' => 't.lat',
-                // oppure, con una colonna geometry: 'geom' => 't.geom',
+            // 1. OpenAddresses Italia (colonne LON, LAT, NUMBER, STREET, UNIT, CITY,
+            //    DISTRICT, REGION, POSTCODE, ID, HASH), già caricato in una tabella.
+            //    Se le colonne sono state create in maiuscolo con le virgolette,
+            //    scrivile così: 't."STREET"'.
+            [
+                'fonte' => 'openaddresses',
+                'tipo' => 'tabella',
+                'tabella' => 'public.openaddresses',  // oppure 'query' => 'SELECT ... FROM ...'
+                'filtro' => null,                     // es. "t.region = 'TOSCANA'" per un import parziale
+                'srid' => 4326,
+                'colonne' => [
+                    'fonte_id' => 't.hash',
+                    'via' => 't.street',
+                    'civico' => 't.number',           // comprende gli esponenti: 12/A
+                    'interno' => 't.unit',            // scala, interno: "INT 4"
+                    'frazione' => 't.district',
+                    'comune' => 't.city',
+                    'provincia' => 't.region',
+                    'cap' => 't.postcode',
+                    'lon' => 't.lon',
+                    'lat' => 't.lat',
+                ],
             ],
-        ],
-        // Altre fonti possibili per i civici:
-        //   da un altro database:  ['tipo' => 'pdo', 'dsn' => 'pgsql:host=...;dbname=oa', 'utente' => ..., 'password' => ...,
-        //                           'tabella' => 'public.openaddresses', 'colonne' => [... 'geom' => 'ST_AsEWKT(t.geom)']]
-        //   dai file di OpenAddresses (mappatura predefinita, 'colonne' facoltativa):
-        //                          ['tipo' => 'csv', 'file' => '/dati/oa/it/*.csv']   (anche .csv.gz)
-        //                          ['tipo' => 'geojsonl', 'file' => '/dati/oa/it/*.geojson']
+            // In alternativa, direttamente dai file di OpenAddresses (mappatura predefinita):
+            //   ['fonte' => 'openaddresses', 'tipo' => 'csv', 'file' => '/dati/oa/it/*.csv']   (anche .csv.gz)
+            //   ['fonte' => 'openaddresses', 'tipo' => 'geojsonl', 'file' => '/dati/oa/it/*.geojson']
 
-        // Toponimi IGM. Il formato esatto della fonte non è ancora noto: questo è
-        // un esempio per uno shapefile; tipo 'tabella' o 'pdo' funzionano allo stesso modo.
+            // 2. OpenStreetMap, tabella osm_civici creata da scripts/osm_civici.sql.
+            [
+                'fonte' => 'osm',
+                'tipo' => 'tabella',
+                'tabella' => 'public.osm_civici',
+                'colonne' => [
+                    'fonte_id' => "t.osm_type || t.osm_id",
+                    'via' => 't.via',
+                    'civico' => 't.civico',
+                    'interno' => 't.interno',
+                    'frazione' => 't.frazione',
+                    'comune' => 't.comune',
+                    'cap' => 't.cap',
+                    'geom' => 't.geom',
+                ],
+            ],
+            // Una fonte in un altro database:
+            //   ['fonte' => ..., 'tipo' => 'pdo', 'dsn' => 'pgsql:host=...;dbname=...', 'utente' => ..., 'password' => ...,
+            //    'tabella' => ..., 'colonne' => [... 'geom' => 'ST_AsEWKT(t.geom)']]
+        ],
+
+        // Toponimi: località significative del DBSN IGM (tabella loc_sg).
+        // Se il DBSN è in un GeoPackage usa 'tipo' => 'file' (ogr2ogr legge il
+        // sistema di riferimento dal file); se l'hai già caricato in PostGIS usa
+        // 'tipo' => 'tabella' con 'tabella' => 'dbsn.loc_sg'.
+        // Le funzioni geocoder.dbsn_* (sql/04_dbsn.sql) traducono il codice del tipo
+        // e calcolano l'importanza da tipo e significatività.
         'toponimi' => [
+            'fonte' => 'dbsn',
             'tipo' => 'file',
-            'file' => '/dati/igm/toponimi.shp',
-            'srid' => 3003,          // solo se il file non ha il .prj
-            'codifica' => 'UTF-8',   // codifica del .dbf, es. 'ISO-8859-1'
+            'file' => '/dati/dbsn/dbsn.gpkg',
+            'layer' => 'loc_sg',
             'colonne' => [
                 'fonte_id' => 't.ogc_fid',
-                'nome' => 't.toponimo',
-                'tipo' => 't.classe',
-                // Campi della fonte da conservare in toponimi_igm.attributi (jsonb):
-                'attributi' => "jsonb_build_object('quota', t.quota)",
+                'nome' => 't.loc_sg_top',
+                'tipo' => 'geocoder.dbsn_tipo_localita(t.loc_sg_ty)',
+                'importanza' => 'geocoder.dbsn_importanza(t.loc_sg_ty, t.loc_sg_sgn)',
+                'attributi' => "jsonb_build_object('loc_sg_ty', t.loc_sg_ty, 'loc_sg_sgn', t.loc_sg_sgn)",
                 'geom' => 't.geom',
             ],
         ],

@@ -24,7 +24,7 @@ final class GeocoderInverso
         // (in metri, sul geoide) li riordina.
         $st = $this->db->prepare(
             'WITH p AS (SELECT ST_SetSRID(ST_MakePoint(:lon::float8, :lat::float8), 4326) AS g, :r::float8 AS r)
-             SELECT c.id, c.civico, c.cap, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat, c.dist,
+             SELECT c.id, c.civico, c.cap, c.fonte, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat, c.dist,
                     coalesce(s.nome, c.via) AS via, s.id AS strada_id, c.istat, k.nome AS comune, k.provincia
              FROM (
                  SELECT c.*, ST_Distance(c.geom::geography, p.g::geography) AS dist
@@ -47,7 +47,7 @@ final class GeocoderInverso
                 'etichetta' => Geocoder::etichetta($c['via'], $c['civico'], $c['cap'], $c['comune'], $c['provincia']),
                 'via' => $c['via'], 'civico' => $c['civico'], 'cap' => $c['cap'],
                 'comune' => $c['comune'], 'provincia' => $c['provincia'], 'istat' => $c['istat'],
-                'fonte' => 'openaddresses', 'id' => (int) $c['id'],
+                'fonte' => $c['fonte'], 'id' => (int) $c['id'],
                 'strada_id' => $c['strada_id'] === null ? null : (int) $c['strada_id'],
             ];
         }
@@ -57,7 +57,7 @@ final class GeocoderInverso
 
         $st = $this->db->prepare(
             'WITH p AS (SELECT ST_SetSRID(ST_MakePoint(:lon::float8, :lat::float8), 4326) AS g, :r::float8 AS r)
-             SELECT t.id, t.nome, t.tipo, t.istat, ST_X(t.punto) AS lon, ST_Y(t.punto) AS lat, t.dist,
+             SELECT t.id, t.nome, t.tipo, t.istat, t.fonte, ST_X(t.punto) AS lon, ST_Y(t.punto) AS lat, t.dist,
                     k.nome AS comune, k.provincia
              FROM (
                  SELECT t.*, ST_Distance(t.punto::geography, p.g::geography) AS dist
@@ -78,7 +78,7 @@ final class GeocoderInverso
                 'etichetta' => Geocoder::etichetta($t['nome'], null, null, $t['comune'], $t['provincia']),
                 'nome' => $t['nome'], 'tipo' => $t['tipo'],
                 'comune' => $t['comune'], 'provincia' => $t['provincia'], 'istat' => $t['istat'],
-                'fonte' => 'igm', 'id' => (int) $t['id'],
+                'fonte' => $t['fonte'], 'id' => (int) $t['id'],
             ];
         }
         if ($risultati !== []) {

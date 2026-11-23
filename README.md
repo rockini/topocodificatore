@@ -2,7 +2,9 @@
 
 Geocoder per l'Italia su PostgreSQL/PostGIS, con API in PHP.
 
-- **Dati**: civici [OpenAddresses](https://openaddresses.io), toponimi IGM, confini comunali ISTAT.
+- **Dati**: civici [OpenAddresses](https://openaddresses.io) e OpenStreetMap, località significative
+  del DBSN IGM (`loc_sg`), confini comunali ISTAT.
+- **Funzione PHP** `geocodifica($indirizzo)`: lista di posizioni candidate con probabilità.
 - **Ricerca a cascata**: civico → via → frazione/toponimo IGM → comune, con un punteggio di confidenza.
 - **API**: `/search` e `/reverse` (KNN PostGIS), risposte in GeoJSON.
 
@@ -33,6 +35,24 @@ curl 'http://localhost:8080/reverse?lat=45.4806&lon=9.1873&raggio=50&limit=3'
 curl 'http://localhost:8080/health'
 ```
 
+## Uso da PHP
+
+```php
+require 'src/bootstrap.php';   // oppure vendor/autoload.php
+
+$candidati = \Topocodificatore\geocodifica('Via Roma 12, 50123 Firenze', 5);
+foreach ($candidati as $c) {
+    printf("%.6f %.6f  p=%.2f  %s (%s)\n", $c['lat'], $c['lon'], $c['probabilita'], $c['etichetta'], $c['livello']);
+}
+```
+
+Ogni candidato ha `lat`, `lon`, `probabilita` (peso rispetto agli altri candidati restituiti, le
+probabilità sommano a 1), `confidenza` (quanto il candidato corrisponde all'indirizzo, da 0 a 1,
+indipendente dagli altri), `livello`, `etichetta`, i campi dell'indirizzo e la `fonte`
+(`openaddresses`, `osm`, `dbsn`, `istat`, `strade` per il centro di una via, `interpolazione`).
+Se l'unico candidato è il centro del comune, la probabilità è 1 ma la confidenza resta bassa: per
+decidere se fidarsi del risultato guarda la confidenza.
+
 ## Struttura
 
 | Percorso | Contenuto |
@@ -40,6 +60,8 @@ curl 'http://localhost:8080/health'
 | `sql/01_estensioni.sql` | estensioni e schemi `geocoder` e `staging` |
 | `sql/02_funzioni.sql` | normalizzazione di nomi e civici (`geocoder.normalizza`, `geocoder.civico`, `geocoder.dug`, `geocoder.denominazione`) |
 | `sql/03_schema.sql` | tabelle e indici GiST / trigram |
+| `sql/04_dbsn.sql` | dominio dei tipi di località DBSN e calcolo dell'importanza |
+| `scripts/osm_civici.sql` | estrazione dei civici da un import osm2pgsql (`--hstore`) |
 | `sql/import/*.sql` | trasformazione da staging alle tabelle definitive |
 | `bin/schema.php`, `bin/importa.php` | script da riga di comando |
 | `src/` | importatore, analizzatore degli indirizzi, geocoder, API |
@@ -51,13 +73,14 @@ curl 'http://localhost:8080/health'
 Schema `geocoder`, tutto in WGS84 (EPSG:4326):
 
 - **`comuni`**: codice ISTAT, nome, sigla della provincia, regione, confine (MultiPolygon) e un punto interno.
-- **`civici`**: i civici OpenAddresses con via e civico originali, via normalizzata, civico scomposto
-  (`numero`, `esponente`, `snc`), CAP, comune (ricavato dalla posizione) e strada.
+- **`civici`**: i civici di tutte le fonti con via e civico originali, via normalizzata, civico scomposto
+  (`numero`, `esponente`, `snc`), interno, CAP, frazione, comune (ricavato dalla posizione), strada e fonte.
 - **`strade`**: aggregate dai civici per comune e nome normalizzato. I civici con lo stesso nome ma lontani
   più di ~1 km (DBSCAN) diventano strade diverse, così due "Via Roma" in frazioni diverse non si fondono.
   Il punto della strada è il civico più vicino al baricentro.
-- **`toponimi_igm`**: nome, classe, comune, geometria originale (punto, linea o area), un punto sulla
-  geometria e gli attributi della fonte che si vogliono tenere (`jsonb`).
+- **`toponimi_igm`**: nome, tipo, comune, geometria originale (punto, linea o area), un punto sulla
+  geometria, importanza (0–1, decide tra toponimi omonimi), fonte e gli attributi della fonte che si
+  vogliono tenere (`jsonb`).
 - **`importazioni`**: registro degli import.
 
 Indici: GiST sulle geometrie (anche per il KNN di `/reverse`), GIN trigram (`pg_trgm`) sui nomi normalizzati.
@@ -91,8 +114,8 @@ transazione: se l'import fallisce, restano i dati precedenti. Importa prima i co
 ricavano il comune dalla posizione. Dopo aver reimportato i comuni, reimporta anche civici e toponimi.
 
 Ogni fonte si descrive in `config/config.php` con un **tipo** e una **mappatura** dalle colonne canoniche
-alla fonte. Così lo schema del database con i civici e il formato dei toponimi IGM non sono cablati nel
-codice. Vedi `config/config.example.php`.
+alla fonte. Un dataset può avere più fonti, in ordine di priorità: per i civici, quando lo stesso civico
+compare in due fonti (stesso numero, via con nome simile, entro 30 m) si tiene quello della prima. Così lo schema delle tabelle sorgente non è cablato nel codice. Vedi `config/config.example.php`.
 
 | Tipo | Fonte | La mappatura contiene |
 |---|---|---|
@@ -106,8 +129,22 @@ Colonne canoniche (più `geom` oppure `lon` e `lat`; `srid` indica il sistema de
 Mario, 6707/6708 RDN2008, 32632/32633 UTM):
 
 - `comuni`: `istat`, `nome`, `provincia`, `regione`
-- `civici`: `fonte_id`, `via`, `civico`, `unita`, `comune`, `provincia`, `cap`
-- `toponimi`: `fonte_id`, `nome`, `tipo`, `attributi` (un'espressione che restituisce JSON)
+- `civici`: `fonte_id`, `via`, `civico` (con l'esponente: `12/A`), `interno` (scala, interno), `frazione`,
+  `comune`, `provincia`, `cap`
+- `toponimi`: `fonte_id`, `nome`, `tipo`, `importanza` (0–1), `attributi` (un'espressione che restituisce JSON)
+
+Oltre alla mappatura, ogni fonte ha un nome (`'fonte' => 'osm'`) che finisce nei risultati.
+
+### Le tre fonti previste
+
+- **OpenAddresses Italia**: `NUMBER` contiene già l'esponente, `UNIT` è l'interno e non entra nel civico,
+  `DISTRICT` diventa la frazione (aiuta a scegliere tra vie omonime dello stesso comune). Il nome della
+  strada mostrato è la grafia più frequente, preferendo quelle non tutte maiuscole.
+- **OpenStreetMap**: la tabella `osm_civici` di `scripts/osm_civici.sql`, con priorità più bassa di
+  OpenAddresses.
+- **DBSN, località significative (`loc_sg`)**: `loc_sg_top` è il nome; `geocoder.dbsn_tipo_localita(loc_sg_ty)`
+  traduce il codice del tipo; `geocoder.dbsn_importanza(loc_sg_ty, loc_sg_sgn)` dà più peso alle località
+  di primo ordine e ai luoghi abitati rispetto alle aree geografiche (monti, valli...).
 
 Righe senza geometria leggibile, senza via o senza nome vengono scartate; i civici duplicati (stesso comune,
 via, civico e punto) vengono tenuti una volta sola. Il conteggio finisce in `geocoder.importazioni`.
@@ -131,7 +168,7 @@ Cascata:
    e, dentro il comune, con distanza di Levenshtein per i refusi (`Via Rome`);
 3. **civico** sulla via trovata: esatto, stesso numero con altro esponente, **interpolato** tra il civico
    precedente e il successivo dello stesso lato (stessa parità), oppure il più vicino;
-4. **toponimo IGM** se non c'è una via (o se la via è una località: `Località Pocol`);
+4. **toponimo** (località DBSN) se non c'è una via (o se la via è una località: `Località Pocol`);
 5. **comune** come ultima risorsa.
 
 Ogni risultato è una `Feature` con `livello` (`civico`, `civico_interpolato`, `civico_vicino`, `via`,
@@ -161,7 +198,7 @@ o indovinato.
 
 `lat`, `lon`, `raggio` in metri (predefinito 100, massimo 5000), `limit` (predefinito 1). Restituisce i
 civici più vicini (KNN con `<->` sull'indice GiST, poi distanza in metri sul geoide); se non ce ne sono
-nel raggio, il toponimo IGM più vicino entro 2 km; altrimenti il comune che contiene il punto.
+nel raggio, il toponimo più vicino entro 2 km; altrimenti il comune che contiene il punto.
 
 ### `GET /health`
 
@@ -181,8 +218,8 @@ I dati in `tests/fixtures` sono sintetici (poche vie e confini rettangolari), se
 
 ## Limiti noti e prossimi passi
 
-- I toponimi IGM e lo schema dei civici sono gestiti con mappature configurabili: con i dati veri vanno
-  scritte le mappature giuste e verificate classi e attributi da tenere.
+- Le mappature di `config/config.example.php` seguono le strutture descritte di OpenAddresses, di
+  `osm_civici` e di `loc_sg`: vanno controllati i nomi esatti di tabelle e colonne nel database reale.
 - Le prestazioni vanno misurate sul dataset completo (`EXPLAIN ANALYZE` delle query di `/search`).
 - Durante un import le tabelle restano bloccate in lettura fino al commit.
 - Le sigle delle province non sono nello shapefile ISTAT dei comuni: si ricavano con un'espressione

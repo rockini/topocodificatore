@@ -66,7 +66,7 @@ if (!getenv('GEOCODER_TEST_DSN')) {
     foreach (glob(dirname(__DIR__) . '/sql/0*.sql') as $file) {
         $db->exec((string) file_get_contents($file));
     }
-    $db->exec((string) file_get_contents(__DIR__ . '/fixtures/toponimi_igm.sql'));
+    $db->exec((string) file_get_contents(__DIR__ . '/fixtures/fonti_prova.sql'));
 
     // Normalizzazione SQL.
     $norm = [
@@ -102,15 +102,24 @@ if (!getenv('GEOCODER_TEST_DSN')) {
     $imp = new Importatore($db, $config->sezione('importazione'), $config->sezione('db'));
     verifica('import comuni', 3, $imp->importa('comuni')['importate']);
     $civici = $imp->importa('civici');
-    verifica('import civici: righe lette', 47, $civici['righe']);
-    verifica('import civici: importati', 46, $civici['importate']);
-    verifica('import toponimi (scarta quello senza nome)', 3, $imp->importa('toponimi')['importate']);
-    verifica('strade aggregate (due "Via Roma" distinte a Genova)', 10, (int) $db->query('SELECT count(*) FROM geocoder.strade')->fetchColumn());
+    verifica('import civici: righe lette (48 OpenAddresses + 4 OSM)', 52, $civici['righe']);
+    verifica('import civici: importati (scartati una riga illeggibile e un doppione OSM)', 50, $civici['importate']);
+    verifica('civici per fonte', ['openaddresses' => 47, 'osm' => 3],
+        array_map('intval', $db->query('SELECT fonte, count(*) FROM geocoder.civici GROUP BY fonte ORDER BY fonte')->fetchAll(PDO::FETCH_KEY_PAIR)));
+    verifica('interno (UNIT) separato dal civico', ['50', 50, 'INT 4'],
+        array_values($db->query("SELECT civico, numero, interno FROM geocoder.civici WHERE interno IS NOT NULL")->fetch(PDO::FETCH_NUM)));
+    verifica('import toponimi DBSN (scarta quello senza nome)', 4, $imp->importa('toponimi')['importate']);
+    verifica('tipo e importanza DBSN', ['centro abitato con più di 1000 abitanti', 0.808],
+        array_map(static fn ($v) => is_numeric($v) ? round((float) $v, 3) : $v,
+            $db->query("SELECT tipo, importanza FROM geocoder.toponimi_igm WHERE nome = 'Chiaravalle' ORDER BY importanza DESC")->fetch(PDO::FETCH_NUM)));
+    verifica('strade aggregate (due "Via Roma" distinte a Genova)', 11, (int) $db->query('SELECT count(*) FROM geocoder.strade')->fetchColumn());
+    verifica('nome della strada: preferita la grafia non maiuscola', 1,
+        (int) $db->query("SELECT count(*) FROM geocoder.strade WHERE nome = 'Via Giuseppe Garibaldi'")->fetchColumn());
     verifica('civici tutti assegnati a una strada', 0, (int) $db->query('SELECT count(*) FROM geocoder.civici WHERE strada_id IS NULL')->fetchColumn());
-    verifica('reimport idempotente', 46, $imp->importa('civici')['importate']);
+    verifica('reimport idempotente', 50, $imp->importa('civici')['importate']);
 
     // Import da GeoJSON a righe (formato attuale di OpenAddresses).
-    $imp2 = new Importatore($db, ['civici' => ['tipo' => 'geojsonl', 'file' => __DIR__ . '/fixtures/oa_civici.geojson']], $config->sezione('db'));
+    $imp2 = new Importatore($db, ['civici' => ['fonte' => 'openaddresses', 'tipo' => 'geojsonl', 'file' => __DIR__ . '/fixtures/oa_civici.geojson']], $config->sezione('db'));
     verifica('import civici da geojsonl', 5, $imp2->importa('civici')['importate']);
     $imp->importa('civici');
 
@@ -128,14 +137,22 @@ if (!getenv('GEOCODER_TEST_DSN')) {
     verifica('search civico esatto: coordinate', [9.187, 45.48065], $xy);
 
     [, $r] = $cerca(['q' => 'v. g. garibaldi 12/a milano']);
-    verifica('search con abbreviazioni ed esponente', ['civico', '12 A'], [$r['livello'], $r['civico']]);
+    verifica('search con abbreviazioni ed esponente', ['civico', '12/A'], [$r['livello'], $r['civico']]);
 
     [, $r] = $cerca(['q' => 'Via Garibaldi 22, Milano']);
     verifica('search senza nome di battesimo', ['civico', 'Via Giuseppe Garibaldi'], [$r['livello'], $r['via']]);
     verifica('search senza nome di battesimo: confidenza alta', true, $r['confidenza'] >= 0.8);
 
     [, $r, $xy] = $cerca(['q' => 'Via Giuseppe Garibaldi 31, Milano']);
+    verifica('search civico che c\'è solo in OSM', ['civico', 'osm'], [$r['livello'], $r['fonte']]);
+    [, $r, $xy] = $cerca(['q' => 'Via Giuseppe Garibaldi 33, Milano']);
     verifica('search civico mancante senza vicini dopo: il più vicino', 'civico_vicino', $r['livello']);
+    [, $r] = $cerca(['q' => 'Via Brera 2, Milano']);
+    verifica('search via che c\'è solo in OSM', ['civico', 'osm'], [$r['livello'], $r['fonte']]);
+    [, $r] = $cerca(['q' => 'VIA GIUSEPPE GARIBALDI 50 MILANO']);
+    verifica('search in maiuscolo, civico con interno', ['civico', '50'], [$r['livello'], $r['civico']]);
+    [, $r] = $cerca(['q' => 'Via Roma, Voltri, Genova']);
+    verifica('search con frazione (DISTRICT): sceglie la Via Roma giusta', '16158', $r['cap']);
     [, $r, $xy] = $cerca(['q' => 'Via Giuseppe Garibaldi 34, Milano']);
     verifica('search civico interpolato tra 30 e 40', 'civico_interpolato', $r['livello']);
     verifica('search civico interpolato: posizione', [9.1873, 45.4817], [round($xy[0], 4), round($xy[1], 4)]);
@@ -162,7 +179,7 @@ if (!getenv('GEOCODER_TEST_DSN')) {
     verifica('search con frazione e comune abbreviato', ['civico', '025016'], [$r['livello'], $r['istat']]);
 
     [, $r] = $cerca(['q' => 'Località Pocol, Cortina']);
-    verifica('search fallback toponimo IGM', ['toponimo', 'Pocol', 'igm'], [$r['livello'], $r['nome'], $r['fonte']]);
+    verifica('search fallback toponimo DBSN', ['toponimo', 'Pocol', 'dbsn'], [$r['livello'], $r['nome'], $r['fonte']]);
 
     [, $r] = $cerca(['q' => 'Chiaravalle']);
     verifica('search solo toponimo', ['toponimo', '015146'], [$r['livello'], $r['istat']]);
@@ -177,12 +194,19 @@ if (!getenv('GEOCODER_TEST_DSN')) {
     [, $r] = $cerca(['q' => 'Milano']);
     verifica('search solo comune', ['comune', 1.0], [$r['livello'], $r['confidenza']]);
 
+    // La funzione geocodifica(): lista di posizioni con probabilità.
+    $candidati = \Topocodificatore\geocodifica('Via Roma, Genova', 5, $db);
+    verifica('geocodifica: due candidati', 2, count($candidati));
+    verifica('geocodifica: probabilità che sommano a 1', 1.0, round(array_sum(array_column($candidati, 'probabilita')), 2));
+    verifica('geocodifica: coordinate', true, isset($candidati[0]['lat'], $candidati[0]['lon']));
+    verifica('geocodifica: niente', [], \Topocodificatore\geocodifica('  ', 5, $db));
+
     [$s] = $cerca([]);
     verifica('search senza parametri: 400', 400, $s);
 
     [$s, $corpo] = $api->gestisci('GET', '/reverse', ['lat' => '45.4806', 'lon' => '9.1873', 'limit' => '2']);
     verifica('reverse: due civici', 2, count($corpo['features']));
-    verifica('reverse: il più vicino', '12 A', $corpo['features'][0]['properties']['civico']);
+    verifica('reverse: il più vicino', '12/A', $corpo['features'][0]['properties']['civico']);
     verifica('reverse: GeoJSON', 'FeatureCollection', $corpo['type']);
 
     [, $corpo] = $api->gestisci('GET', '/reverse', ['lat' => '46.5291', 'lon' => '12.0971']);

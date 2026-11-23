@@ -26,10 +26,12 @@ CREATE TABLE IF NOT EXISTS geocoder.strade (
     dug            text,                         -- 'via', 'piazza', ...
     denominazione  text NOT NULL,                -- nome senza DUG e articoli
     cap            text,                         -- CAP più frequente tra i civici
+    frazione       text,                         -- frazione più frequente tra i civici
     n_civici       integer NOT NULL,
     civici_geom    geometry(MultiPoint, 4326) NOT NULL,
     centroide      geometry(Point, 4326) NOT NULL  -- il civico più vicino al baricentro
 );
+ALTER TABLE geocoder.strade ADD COLUMN IF NOT EXISTS frazione text;
 CREATE INDEX IF NOT EXISTS strade_centroide_gist      ON geocoder.strade USING gist (centroide);
 CREATE INDEX IF NOT EXISTS strade_denominazione_trgm  ON geocoder.strade USING gin (denominazione gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS strade_istat_denominazione ON geocoder.strade (istat, denominazione);
@@ -46,11 +48,16 @@ CREATE TABLE IF NOT EXISTS geocoder.civici (
     esponente   text,
     snc         boolean NOT NULL DEFAULT false,
     civico_norm text,
+    interno     text,                            -- scala, interno... (UNIT di OpenAddresses)
     cap         text,
+    frazione    text,                            -- frazione o quartiere (DISTRICT di OpenAddresses)
     geom        geometry(Point, 4326) NOT NULL,
-    fonte       text NOT NULL DEFAULT 'openaddresses',
+    fonte       text NOT NULL DEFAULT 'openaddresses',   -- 'openaddresses', 'osm', ...
     fonte_id    text
 );
+-- Colonne aggiunte dopo la prima versione dello schema.
+ALTER TABLE geocoder.civici ADD COLUMN IF NOT EXISTS interno text;
+ALTER TABLE geocoder.civici ADD COLUMN IF NOT EXISTS frazione text;
 CREATE INDEX IF NOT EXISTS civici_geom_gist     ON geocoder.civici USING gist (geom);
 CREATE INDEX IF NOT EXISTS civici_strada_numero ON geocoder.civici (strada_id, numero, esponente);
 CREATE INDEX IF NOT EXISTS civici_cap           ON geocoder.civici (cap) WHERE cap IS NOT NULL;
@@ -65,9 +72,13 @@ CREATE TABLE IF NOT EXISTS geocoder.toponimi_igm (
     istat      text,
     geom       geometry(Geometry, 4326) NOT NULL,
     punto      geometry(Point, 4326) NOT NULL,
+    importanza real NOT NULL DEFAULT 0.5,        -- 0..1: a parità di nome vince il toponimo più importante
     attributi  jsonb,                            -- altri campi della fonte, a scelta
+    fonte      text NOT NULL DEFAULT 'igm',      -- es. 'dbsn' per le località significative del DBSN
     fonte_id   text
 );
+ALTER TABLE geocoder.toponimi_igm ADD COLUMN IF NOT EXISTS importanza real NOT NULL DEFAULT 0.5;
+ALTER TABLE geocoder.toponimi_igm ADD COLUMN IF NOT EXISTS fonte text NOT NULL DEFAULT 'igm';
 CREATE INDEX IF NOT EXISTS toponimi_punto_gist     ON geocoder.toponimi_igm USING gist (punto);
 CREATE INDEX IF NOT EXISTS toponimi_nome_norm_trgm ON geocoder.toponimi_igm USING gin (nome_norm gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS toponimi_istat          ON geocoder.toponimi_igm (istat);
@@ -84,20 +95,24 @@ CREATE TABLE IF NOT EXISTS geocoder.importazioni (
 );
 
 -- Tabelle di appoggio per l'import: colonne canoniche, tutte testuali, più la
--- geometria calcolata. Gli script le svuotano e le riempiono a ogni import.
+-- geometria calcolata. Gli script le svuotano e le riempiono a ogni import, e
+-- qui vengono ricreate perché non contengono nulla da conservare.
+-- fonte e priorita identificano la fonte quando un dataset ne ha più d'una
+-- (priorita 0 = la prima della configurazione, che vince sui doppioni).
+DROP TABLE IF EXISTS staging.comuni, staging.civici, staging.toponimi;
 CREATE UNLOGGED TABLE IF NOT EXISTS staging.comuni (
     istat text, nome text, provincia text, regione text,
-    geom_txt text, lon text, lat text,
+    geom_txt text, lon text, lat text, fonte text, priorita int,
     geom geometry
 );
 CREATE UNLOGGED TABLE IF NOT EXISTS staging.civici (
-    fonte_id text, via text, civico text, unita text, comune text,
+    fonte_id text, via text, civico text, interno text, frazione text, comune text,
     provincia text, cap text,
-    geom_txt text, lon text, lat text,
+    geom_txt text, lon text, lat text, fonte text, priorita int,
     geom geometry
 );
 CREATE UNLOGGED TABLE IF NOT EXISTS staging.toponimi (
-    fonte_id text, nome text, tipo text, attributi text,
-    geom_txt text, lon text, lat text,
+    fonte_id text, nome text, tipo text, importanza text, attributi text,
+    geom_txt text, lon text, lat text, fonte text, priorita int,
     geom geometry
 );

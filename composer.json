@@ -12,7 +12,8 @@
     "autoload": {
         "psr-4": {
             "Topocodificatore\\": "src/"
-        }
+        },
+        "files": ["src/funzioni.php"]
     },
     "scripts": {
         "test": "php tests/esegui.php"

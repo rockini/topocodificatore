@@ -93,7 +93,7 @@ final class Geocoder
         // 2. Via e civico.
         if ($n['via'] !== null) {
             $vicino = $toponimiLocalita[0] ?? null;
-            foreach ($this->cercaStrade($n, $istat, $c->cap, $vicino, $limite) as $s) {
+            foreach ($this->cercaStrade($n, $istat, $c->cap, $vicino, $n['localita'], $limite) as $s) {
                 $r = $c->civico !== null ? $this->risolviCivico($s, $n['civico']) : null;
                 $r ??= $this->risultatoVia($s);
                 $r['confidenza'] = $r['confidenza'] * $fattoreComune;
@@ -137,7 +137,17 @@ final class Geocoder
         }
         unset($r);
         usort($risultati, static fn ($a, $b) => $b['confidenza'] <=> $a['confidenza']);
-        return array_slice($risultati, 0, $limite);
+        $risultati = array_slice($risultati, 0, $limite);
+
+        // Probabilità: la confidenza di ciascun candidato rispetto agli altri
+        // restituiti (somma 1). La confidenza resta il valore assoluto.
+        $totale = array_sum(array_column($risultati, 'confidenza'));
+        foreach ($risultati as &$r) {
+            $r = ['livello' => $r['livello'], 'confidenza' => $r['confidenza'],
+                  'probabilita' => $totale > 0 ? round($r['confidenza'] / $totale, 3) : 0.0] + $r;
+        }
+        unset($r);
+        return $risultati;
     }
 
     /** @return array<string, ?string> */
@@ -262,12 +272,15 @@ final class Geocoder
      * @param array<string, mixed>|null $vicino toponimo della località indicata, per scegliere tra vie omonime
      * @return list<array<string, mixed>>
      */
-    private function cercaStrade(array $n, ?array $istat, ?string $cap, ?array $vicino, int $limite): array
+    private function cercaStrade(array $n, ?array $istat, ?string $cap, ?array $vicino, ?string $localita, int $limite): array
     {
         $st = $this->db->prepare(
-            'WITH p AS (SELECT :den::text AS den, :via::text AS via, :istat::text[] AS istat,
+            'WITH p AS (SELECT :den::text AS den, :via::text AS via, :istat::text[] AS istat, :loc::text AS loc,
                                ST_SetSRID(ST_MakePoint(:lon::float8, :lat::float8), 4326) AS vicino)
-             SELECT s.id, s.istat, s.nome, s.dug, s.cap, s.n_civici,
+             SELECT s.id, s.istat, s.nome, s.dug, s.cap, s.n_civici, s.frazione,
+                    CASE WHEN p.loc IS NULL OR s.frazione IS NULL THEN NULL
+                         ELSE greatest(similarity(geocoder.normalizza(s.frazione), p.loc),
+                                       strict_word_similarity(geocoder.normalizza(s.frazione), p.loc)) END AS sim_frazione,
                     ST_X(s.centroide) AS lon, ST_Y(s.centroide) AS lat,
                     -- "Garibaldi" per "Giuseppe Garibaldi" (e viceversa) vale quasi quanto il nome esatto.
                     greatest(similarity(s.denominazione, p.den),
@@ -296,7 +309,7 @@ final class Geocoder
         $st->execute([
             'den' => $n['denominazione'], 'via' => $n['via'],
             'istat' => $istat === null ? null : '{' . implode(',', array_map(static fn ($i) => preg_replace('/\D/', '', (string) $i), $istat)) . '}',
-            'lon' => $vicino['lon'] ?? null, 'lat' => $vicino['lat'] ?? null,
+            'lon' => $vicino['lon'] ?? null, 'lat' => $vicino['lat'] ?? null, 'loc' => $localita,
         ]);
         $strade = [];
         foreach ($st->fetchAll() as $s) {
@@ -308,7 +321,10 @@ final class Geocoder
                 $p *= $cap === $s['cap'] ? 1.0 : 0.9;
             }
             if ($s['dist_localita'] !== null && (float) $s['dist_localita'] > 3000) {
-                $p *= 0.9;
+                $p *= 0.9;     // lontana dalla frazione indicata
+            }
+            if ($s['sim_frazione'] !== null && (float) $s['sim_frazione'] < 0.6) {
+                $p *= 0.92;    // i civici della via dicono un'altra frazione
             }
             if ($p >= $this->soglie['via']) {
                 $s['punteggio'] = $p;
@@ -330,7 +346,7 @@ final class Geocoder
     private function risolviCivico(array $s, array $civico): ?array
     {
         if ($civico['snc']) {
-            $st = $this->db->prepare('SELECT id, civico, cap, ST_X(geom) AS lon, ST_Y(geom) AS lat
+            $st = $this->db->prepare('SELECT id, civico, cap, fonte, ST_X(geom) AS lon, ST_Y(geom) AS lat
                                       FROM geocoder.civici WHERE strada_id = :s AND snc LIMIT 1');
             $st->execute(['s' => $s['id']]);
             $c = $st->fetch();
@@ -344,7 +360,7 @@ final class Geocoder
 
         $st = $this->db->prepare(
             'WITH p AS (SELECT :s::bigint AS s, :n::int AS n, :e::text AS e)
-             SELECT c.id, c.civico, c.numero, c.esponente, c.cap, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat
+             SELECT c.id, c.civico, c.numero, c.esponente, c.cap, c.fonte, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat
              FROM geocoder.civici c, p
              WHERE c.strada_id = p.s AND c.numero = p.n
              ORDER BY (coalesce(c.esponente, \'\') = p.e) DESC, c.esponente NULLS FIRST
@@ -384,7 +400,7 @@ final class Geocoder
         // Il civico più vicino come numero, preferendo lo stesso lato.
         $st = $this->db->prepare(
             'WITH p AS (SELECT :s::bigint AS s, :n::int AS n)
-             SELECT c.id, c.civico, c.numero, c.cap, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat
+             SELECT c.id, c.civico, c.numero, c.cap, c.fonte, ST_X(c.geom) AS lon, ST_Y(c.geom) AS lat
              FROM geocoder.civici c, p
              WHERE c.strada_id = p.s AND c.numero IS NOT NULL
              ORDER BY ((c.numero - p.n) % 2 <> 0), abs(c.numero - p.n)
@@ -406,7 +422,8 @@ final class Geocoder
     {
         $st = $this->db->prepare(
             'WITH p AS (SELECT :t::text AS t, :ti::text AS ti, :istat::text[] AS istat)
-             SELECT x.id, x.nome, x.tipo, x.istat, ST_X(x.punto) AS lon, ST_Y(x.punto) AS lat,
+             SELECT x.*, x.sim * (0.85 + 0.15 * x.importanza) AS punteggio FROM (
+             SELECT x.id, x.nome, x.tipo, x.istat, x.fonte, x.importanza, ST_X(x.punto) AS lon, ST_Y(x.punto) AS lat,
                     greatest(similarity(x.nome_norm, p.t), similarity(x.nome_norm, p.ti),
                              0.9 * strict_word_similarity(p.t, x.nome_norm)) AS sim,
                     k.nome AS comune, k.provincia
@@ -415,7 +432,9 @@ final class Geocoder
              LEFT JOIN geocoder.comuni k ON k.istat = x.istat
              WHERE (x.nome_norm % p.t OR x.nome_norm % p.ti OR x.nome_norm = p.t OR p.t <<% x.nome_norm)
                AND (p.istat IS NULL OR x.istat = ANY (p.istat))
-             ORDER BY sim DESC
+             ) x
+             -- A parità di nome vince il luogo più importante (capoluogo, centro abitato...).
+             ORDER BY punteggio DESC
              LIMIT :lim'
         );
         $st->execute([
@@ -430,12 +449,12 @@ final class Geocoder
             }
             $out[] = [
                 'livello' => 'toponimo',
-                'confidenza' => (float) $t['sim'],
+                'confidenza' => (float) $t['punteggio'],
                 'lon' => (float) $t['lon'], 'lat' => (float) $t['lat'],
                 'etichetta' => self::etichetta($t['nome'], null, null, $t['comune'], $t['provincia']),
                 'nome' => $t['nome'], 'tipo' => $t['tipo'],
                 'comune' => $t['comune'], 'provincia' => $t['provincia'], 'istat' => $t['istat'],
-                'fonte' => 'igm', 'id' => (int) $t['id'],
+                'fonte' => $t['fonte'], 'id' => (int) $t['id'],
             ];
         }
         return $out;
@@ -457,7 +476,8 @@ final class Geocoder
             'etichetta' => self::etichetta($s['nome'], $civicoMostrato, $cap, $s['comune'], $s['provincia']),
             'via' => $s['nome'], 'civico' => $civicoMostrato, 'cap' => $cap,
             'comune' => $s['comune'], 'provincia' => $s['provincia'], 'istat' => $s['istat'],
-            'fonte' => 'openaddresses', 'id' => $c['id'] === null ? null : (int) $c['id'], 'strada_id' => (int) $s['id'],
+            'fonte' => $c['fonte'] ?? 'interpolazione', 'id' => $c['id'] === null ? null : (int) $c['id'],
+            'strada_id' => (int) $s['id'],
         ];
     }
 
@@ -474,7 +494,7 @@ final class Geocoder
             'etichetta' => self::etichetta($s['nome'], null, $s['cap'], $s['comune'], $s['provincia']),
             'via' => $s['nome'], 'cap' => $s['cap'],
             'comune' => $s['comune'], 'provincia' => $s['provincia'], 'istat' => $s['istat'],
-            'fonte' => 'openaddresses', 'strada_id' => (int) $s['id'],
+            'fonte' => 'strade', 'strada_id' => (int) $s['id'],
         ];
     }
 
