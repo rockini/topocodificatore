@@ -8,6 +8,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["7.4", "8.3"]
     services:
       postgres:
         image: postgis/postgis:16-3.4
@@ -23,7 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: ${{ matrix.php }}
           extensions: pdo_pgsql, mbstring
           coverage: none
       - name: ogr2ogr

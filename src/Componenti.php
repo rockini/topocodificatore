@@ -7,15 +7,30 @@ namespace Topocodificatore;
 /** Le parti di un indirizzo, come le ha capite AnalizzatoreIndirizzo o come arrivano dai parametri. */
 final class Componenti
 {
+    public string $testo;
+    public ?string $via;
+    public ?string $civico;
+    public ?string $localita;
+    public ?string $cap;
+    public ?string $comune;
+    public ?string $provincia;
+
     public function __construct(
-        public string $testo = '',
-        public ?string $via = null,
-        public ?string $civico = null,
-        public ?string $localita = null,
-        public ?string $cap = null,
-        public ?string $comune = null,
-        public ?string $provincia = null,
+        string $testo = '',
+        ?string $via = null,
+        ?string $civico = null,
+        ?string $localita = null,
+        ?string $cap = null,
+        ?string $comune = null,
+        ?string $provincia = null
     ) {
+        $this->testo = $testo;
+        $this->via = $via;
+        $this->civico = $civico;
+        $this->localita = $localita;
+        $this->cap = $cap;
+        $this->comune = $comune;
+        $this->provincia = $provincia;
     }
 
     /** @return array<string, string> */

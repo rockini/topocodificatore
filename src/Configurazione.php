@@ -14,9 +14,17 @@ use RuntimeException;
  */
 final class Configurazione
 {
+    /**
+     * Da trattare in sola lettura (in PHP 7.4 non esiste readonly).
+     *
+     * @var array<string, mixed>
+     */
+    public array $valori;
+
     /** @param array<string, mixed> $valori */
-    public function __construct(public readonly array $valori)
+    public function __construct(array $valori)
     {
+        $this->valori = $valori;
     }
 
     public static function carica(?string $file = null): self

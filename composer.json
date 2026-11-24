@@ -3,7 +3,7 @@
     "description": "Geocoder per l'Italia su PostgreSQL/PostGIS: civici OpenAddresses, toponimi IGM, comuni ISTAT",
     "type": "project",
     "require": {
-        "php": ">=8.2",
+        "php": ">=7.4",
         "ext-pdo": "*",
         "ext-pdo_pgsql": "*",
         "ext-json": "*",

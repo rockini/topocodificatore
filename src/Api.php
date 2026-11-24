@@ -17,8 +17,11 @@ use PDO;
  */
 final class Api
 {
-    public function __construct(private readonly PDO $db)
+    private PDO $db;
+
+    public function __construct(PDO $db)
     {
+        $this->db = $db;
     }
 
     /**
@@ -34,12 +37,16 @@ final class Api
             return [405, ['errore' => 'Metodo non consentito: usa GET']];
         }
         try {
-            return match (rtrim($percorso, '/') ?: '/') {
-                '/search' => [200, $this->search($parametri)],
-                '/reverse' => [200, $this->reverse($parametri)],
-                '/health' => [200, $this->health()],
-                default => [404, ['errore' => "Percorso sconosciuto: $percorso", 'percorsi' => ['/search', '/reverse', '/health']]],
-            };
+            switch (rtrim($percorso, '/') ?: '/') {
+                case '/search':
+                    return [200, $this->search($parametri)];
+                case '/reverse':
+                    return [200, $this->reverse($parametri)];
+                case '/health':
+                    return [200, $this->health()];
+                default:
+                    return [404, ['errore' => "Percorso sconosciuto: $percorso", 'percorsi' => ['/search', '/reverse', '/health']]];
+            }
         } catch (InvalidArgumentException $e) {
             return [400, ['errore' => $e->getMessage()]];
         }

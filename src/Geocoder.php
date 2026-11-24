@@ -23,12 +23,15 @@ final class Geocoder
     /** DUG che indicano un luogo più che una strada: si cerca anche tra i toponimi. */
     private const DUG_LUOGO = ['localita', 'frazione', 'contrada', 'borgo', 'borgata', 'case sparse', 'regione', 'villaggio', 'rione', 'quartiere'];
 
+    private PDO $db;
+
     /** @var array<string, float> */
     private array $soglie;
 
     /** @param array<string, float> $soglie soglie di similarità (0..1) per via, toponimo e comune */
-    public function __construct(private readonly PDO $db, array $soglie = [])
+    public function __construct(PDO $db, array $soglie = [])
     {
+        $this->db = $db;
         $this->soglie = $soglie + ['via' => 0.55, 'toponimo' => 0.5, 'comune' => 0.5];
         $this->db->exec('SET pg_trgm.similarity_threshold = 0.3');
         $this->db->exec('SET pg_trgm.strict_word_similarity_threshold = 0.6');
@@ -75,12 +78,15 @@ final class Geocoder
             }
         }
 
-        $richiesto = match (true) {
-            $c->civico !== null && $n['via'] !== null => 'civico',
-            $n['via'] !== null => 'via',
-            $n['localita'] !== null => 'toponimo',
-            default => 'comune',
-        };
+        if ($c->civico !== null && $n['via'] !== null) {
+            $richiesto = 'civico';
+        } elseif ($n['via'] !== null) {
+            $richiesto = 'via';
+        } elseif ($n['localita'] !== null) {
+            $richiesto = 'toponimo';
+        } else {
+            $richiesto = 'comune';
+        }
         $istat = $comuni === null ? null : array_column($comuni, 'istat');
         $risultati = [];
 
@@ -136,7 +142,7 @@ final class Geocoder
             $r['confidenza'] = round(min(1.0, $r['confidenza']), 3);
         }
         unset($r);
-        usort($risultati, static fn ($a, $b) => $b['confidenza'] <=> $a['confidenza']);
+        self::ordinaStabile($risultati, static fn ($a, $b) => $b['confidenza'] <=> $a['confidenza']);
         $risultati = array_slice($risultati, 0, $limite);
 
         // Probabilità: la confidenza di ciascun candidato rispetto agli altri
@@ -331,7 +337,7 @@ final class Geocoder
                 $strade[] = $s;
             }
         }
-        usort($strade, static fn ($a, $b) => [$b['punteggio'], $b['n_civici']] <=> [$a['punteggio'], $a['n_civici']]);
+        self::ordinaStabile($strade, static fn ($a, $b) => [$b['punteggio'], $b['n_civici']] <=> [$a['punteggio'], $a['n_civici']]);
         return array_slice($strade, 0, $limite);
     }
 
@@ -512,6 +518,24 @@ final class Geocoder
             'comune' => $k['nome'], 'provincia' => $k['provincia'], 'istat' => $k['istat'],
             'fonte' => 'istat',
         ];
+    }
+
+    /**
+     * usort() stabile: a parità resta l'ordine di partenza, come in PHP >= 8.0
+     * (in PHP 7.4 l'ordine degli elementi uguali non è garantito).
+     *
+     * @param list<array<string, mixed>> $a
+     * @param callable(mixed, mixed): int $confronto
+     */
+    private static function ordinaStabile(array &$a, callable $confronto): void
+    {
+        $i = 0;
+        foreach ($a as &$v) {
+            $v = [$i++, $v];
+        }
+        unset($v);
+        usort($a, static fn ($x, $y) => $confronto($x[1], $y[1]) ?: $x[0] <=> $y[0]);
+        $a = array_column($a, 1);
     }
 
     public static function etichetta(?string $via, ?string $civico, ?string $cap, ?string $comune, ?string $provincia): string
