@@ -61,6 +61,14 @@ final class Importatore
         ],
     ];
 
+    private PDO $db;
+
+    /** @var array<string, mixed> */
+    private array $config;
+
+    /** @var array<string, mixed> */
+    private array $configDb;
+
     /** @var callable(string): void */
     private $log;
 
@@ -68,12 +76,11 @@ final class Importatore
      * @param array<string, mixed> $config la sezione "importazione" della configurazione
      * @param array<string, mixed> $configDb la sezione "db", serve a ogr2ogr
      */
-    public function __construct(
-        private readonly PDO $db,
-        private readonly array $config,
-        private readonly array $configDb,
-        ?callable $log = null,
-    ) {
+    public function __construct(PDO $db, array $config, array $configDb, ?callable $log = null)
+    {
+        $this->db = $db;
+        $this->config = $config;
+        $this->configDb = $configDb;
         $this->log = $log ?? static function (string $m): void {
         };
     }
@@ -89,7 +96,7 @@ final class Importatore
             throw new InvalidArgumentException("Nella configurazione manca importazione.$dataset");
         }
         // Una fonte sola oppure un elenco di fonti, in ordine di priorità.
-        if (!array_is_list($specs)) {
+        if (!self::eLista($specs)) {
             $specs = [$specs];
         }
         $iniziata = date('c');
@@ -135,19 +142,30 @@ final class Importatore
     private function caricaFonte(string $dataset, array $spec, int $priorita): string
     {
         $tipo = $spec['tipo'] ?? '';
-        $fonte = (string) ($spec['fonte'] ?? match ($dataset) {
-            'civici' => 'openaddresses', 'toponimi' => 'igm', default => 'istat',
-        });
+        $fontePredefinita = ['civici' => 'openaddresses', 'toponimi' => 'igm'][$dataset] ?? 'istat';
+        $fonte = (string) ($spec['fonte'] ?? $fontePredefinita);
         ($this->log)("[$dataset] caricamento in staging di '$fonte' (tipo $tipo)");
         $srid = (int) ($spec['srid'] ?? 4326);
-        $descrizione = match ($tipo) {
-            'tabella' => $this->daTabella($dataset, $spec),
-            'file' => $this->daFile($dataset, $spec, $srid),
-            'pdo' => $this->daPdo($dataset, $spec),
-            'csv' => $this->daCsv($dataset, $spec),
-            'geojsonl' => $this->daGeojsonl($dataset, $spec),
-            default => throw new InvalidArgumentException("importazione.$dataset.tipo non valido: '$tipo'"),
-        };
+        // match() di PHP 8 confronta con ===: lo switch non deve accettare 0 o true.
+        switch (is_string($tipo) ? $tipo : null) {
+            case 'tabella':
+                $descrizione = $this->daTabella($dataset, $spec);
+                break;
+            case 'file':
+                $descrizione = $this->daFile($dataset, $spec, $srid);
+                break;
+            case 'pdo':
+                $descrizione = $this->daPdo($dataset, $spec);
+                break;
+            case 'csv':
+                $descrizione = $this->daCsv($dataset, $spec);
+                break;
+            case 'geojsonl':
+                $descrizione = $this->daGeojsonl($dataset, $spec);
+                break;
+            default:
+                throw new InvalidArgumentException("importazione.$dataset.tipo non valido: '$tipo'");
+        }
         $this->db->prepare("UPDATE staging.$dataset SET fonte = :f, priorita = :p WHERE priorita IS NULL")
             ->execute(['f' => $fonte, 'p' => $priorita]);
 
@@ -197,7 +215,16 @@ final class Importatore
         return $mappa;
     }
 
-    /** @param array<string, string> $mappa */
+    /**
+     * Equivalente di array_is_list() (PHP 8.1).
+     *
+     * @param array<mixed> $a
+     */
+    private static function eLista(array $a): bool
+    {
+        return $a === [] || array_keys($a) === range(0, count($a) - 1);
+    }
+
     private static function colonnaStaging(string $canonica): string
     {
         return $canonica === 'geom' ? 'geom_txt' : $canonica;
@@ -250,7 +277,7 @@ final class Importatore
         $dsn = (string) $this->configDb['dsn'];
         $parti = [];
         foreach (explode(';', preg_replace('/^pgsql:/', '', $dsn)) as $coppia) {
-            if (str_contains($coppia, '=')) {
+            if (strpos($coppia, '=') !== false) {
                 [$k, $v] = explode('=', $coppia, 2);
                 $parti[] = trim($k) . '=' . trim($v);
             }
@@ -313,7 +340,7 @@ final class Importatore
         if ($sorgente->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
             $sorgente->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
         }
-        $scrittore = new ScrittoreCopy($this->db, "staging.$dataset", array_map(self::colonnaStaging(...), array_keys($mappa)));
+        $scrittore = new ScrittoreCopy($this->db, "staging.$dataset", array_map([self::class, 'colonnaStaging'], array_keys($mappa)));
         foreach ($sorgente->query($sql, PDO::FETCH_ASSOC) as $riga) {
             $scrittore->aggiungi(array_map(static fn ($v) => $v === null ? null : (string) $v, $riga));
             if ($scrittore->righe() % 100000 === 0) {
@@ -338,9 +365,10 @@ final class Importatore
         return $file;
     }
 
-    private static function apri(string $file): mixed
+    /** @return resource */
+    private static function apri(string $file)
     {
-        $h = fopen(str_ends_with($file, '.gz') ? "compress.zlib://$file" : $file, 'rb');
+        $h = fopen(substr($file, -3) === '.gz' ? "compress.zlib://$file" : $file, 'rb');
         if ($h === false) {
             throw new RuntimeException("Impossibile aprire $file");
         }
@@ -352,11 +380,11 @@ final class Importatore
     {
         $mappa = $this->mappatura($dataset, $spec, $dataset === 'civici' ? self::OPENADDRESSES['csv'] : []);
         $sep = (string) ($spec['separatore'] ?? ',');
-        $scrittore = new ScrittoreCopy($this->db, "staging.$dataset", array_map(self::colonnaStaging(...), array_keys($mappa)));
+        $scrittore = new ScrittoreCopy($this->db, "staging.$dataset", array_map([self::class, 'colonnaStaging'], array_keys($mappa)));
         $elenco = self::file($dataset, $spec);
         foreach ($elenco as $file) {
             $h = self::apri($file);
-            $intestazione = fgetcsv($h, null, $sep, '"', '');
+            $intestazione = fgetcsv($h, 0, $sep, '"', '');
             if (!$intestazione) {
                 fclose($h);
                 continue;
@@ -370,7 +398,7 @@ final class Importatore
                 }
                 $pos[self::colonnaStaging($canonica)] = $indice[strtolower($nome)];
             }
-            while (($r = fgetcsv($h, null, $sep, '"', '')) !== false) {
+            while (($r = fgetcsv($h, 0, $sep, '"', '')) !== false) {
                 if ($r === [null]) {
                     continue;
                 }
@@ -394,7 +422,7 @@ final class Importatore
         $mappa = $this->mappatura($dataset, $spec + ['colonne' => []], ['geom' => '(geometria della feature)']
             + ($dataset === 'civici' ? self::OPENADDRESSES['geojsonl'] : []));
         unset($mappa['lon'], $mappa['lat']);
-        $scrittore = new ScrittoreCopy($this->db, "staging.$dataset", array_map(self::colonnaStaging(...), array_keys($mappa)));
+        $scrittore = new ScrittoreCopy($this->db, "staging.$dataset", array_map([self::class, 'colonnaStaging'], array_keys($mappa)));
         $elenco = self::file($dataset, $spec);
         foreach ($elenco as $file) {
             $h = self::apri($file);

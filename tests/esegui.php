@@ -20,7 +20,11 @@ use Topocodificatore\Import\Importatore;
 $falliti = 0;
 $eseguiti = 0;
 
-function verifica(string $nome, mixed $atteso, mixed $ottenuto): void
+/**
+ * @param mixed $atteso
+ * @param mixed $ottenuto
+ */
+function verifica(string $nome, $atteso, $ottenuto): void
 {
     global $falliti, $eseguiti;
     $eseguiti++;

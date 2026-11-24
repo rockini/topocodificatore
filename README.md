@@ -13,7 +13,7 @@ Il geocoder TIGER incluso in PostGIS non si usa: funziona solo con i dati del ce
 ## Requisiti
 
 - PostgreSQL 13+ con PostGIS 3, `pg_trgm`, `unaccent` e `fuzzystrmatch` (le ultime tre sono in `postgresql-contrib`)
-- PHP 8.2+ con `pdo_pgsql` e `mbstring`
+- PHP 7.4+ (testato con 7.4 e 8.3) con `pdo_pgsql` e `mbstring`
 - `ogr2ogr` (pacchetto `gdal-bin`), solo per importare file (Shapefile, GeoPackage, GeoJSON...)
 
 Nessuna dipendenza Composer: `src/bootstrap.php` fa l'autoload. `composer.json` c'è per chi preferisce

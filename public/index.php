@@ -18,7 +18,7 @@ header('Access-Control-Allow-Methods: GET, OPTIONS');
 $percorso = (string) parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH);
 // Se l'API è pubblicata in una sottocartella, togli il prefisso.
 $base = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/');
-if ($base !== '' && str_starts_with($percorso, $base . '/')) {
+if ($base !== '' && strncmp($percorso, $base . '/', strlen($base) + 1) === 0) {
     $percorso = substr($percorso, strlen($base));
 }
 $percorso = preg_replace('#^/index\.php#', '', $percorso) ?: '/';

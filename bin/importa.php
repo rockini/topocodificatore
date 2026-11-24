@@ -19,7 +19,7 @@ use Topocodificatore\Import\Importatore;
 $opzioni = [];
 $dataset = '';
 foreach (array_slice($argv, 1) as $arg) {
-    if (str_starts_with($arg, '--config=')) {
+    if (strncmp($arg, '--config=', 9) === 0) {
         $opzioni['config'] = substr($arg, 9);
     } else {
         $dataset = $arg;

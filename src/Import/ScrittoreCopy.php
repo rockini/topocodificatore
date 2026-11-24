@@ -13,13 +13,19 @@ final class ScrittoreCopy
     private array $buffer = [];
     private int $righe = 0;
 
+    private PDO $db;
+    private string $tabella;
+    /** @var list<string> */
+    private array $colonne;
+    private int $blocco;
+
     /** @param list<string> $colonne */
-    public function __construct(
-        private readonly PDO $db,
-        private readonly string $tabella,
-        private readonly array $colonne,
-        private readonly int $blocco = 10000,
-    ) {
+    public function __construct(PDO $db, string $tabella, array $colonne, int $blocco = 10000)
+    {
+        $this->db = $db;
+        $this->tabella = $tabella;
+        $this->colonne = $colonne;
+        $this->blocco = $blocco;
     }
 
     /** @param array<string, ?string> $riga valori per nome di colonna; quelli mancanti sono NULL */

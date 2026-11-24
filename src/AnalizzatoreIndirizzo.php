@@ -46,7 +46,7 @@ final class AnalizzatoreIndirizzo
 
     public function analizza(string $testo): Componenti
     {
-        $c = new Componenti(testo: $testo);
+        $c = new Componenti($testo);
         $t = trim((string) preg_replace('/\s+/u', ' ', $testo));
 
         // CAP: l'ultimo gruppo di 5 cifre.

@@ -13,8 +13,11 @@ use PDO;
  */
 final class GeocoderInverso
 {
-    public function __construct(private readonly PDO $db)
+    private PDO $db;
+
+    public function __construct(PDO $db)
     {
+        $this->db = $db;
     }
 
     /** @return list<array<string, mixed>> */
