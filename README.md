@@ -53,6 +53,26 @@ indipendente dagli altri), `livello`, `etichetta`, i campi dell'indirizzo e la `
 Se l'unico candidato è il centro del comune, la probabilità è 1 ma la confidenza resta bassa: per
 decidere se fidarsi del risultato guarda la confidenza.
 
+## Geocodifica di un file CSV
+
+`bin/geocodifica_csv.php` legge un CSV e scrive lo stesso file con tre colonne in più: `confidenza`,
+`latitudine` e `longitudine` del miglior candidato (vuote se l'indirizzo manca o non viene trovato).
+
+```bash
+php bin/geocodifica_csv.php clienti.csv                          # scrive clienti_geocodificato.csv
+php bin/geocodifica_csv.php clienti.csv uscita.csv --colonna=Indirizzo
+php bin/geocodifica_csv.php clienti.csv - --colonna=via,civico,comune > uscita.csv   # più colonne unite
+php bin/geocodifica_csv.php dati.csv --colonna=2 --senza-intestazione --separatore=tab
+```
+
+- `--colonna`: nome (maiuscole e minuscole indifferenti) o posizione da 1; più colonne separate da virgola
+  vengono unite con ", ". Senza `--colonna` si usa la colonna `indirizzo`, `address` o `via`.
+- `--separatore`: predefinito riconosciuto dalla prima riga (`,` `;` tabulazione `|`).
+- `--config`: file di configurazione del database, come per gli altri script.
+
+Gli indirizzi ripetuti si geocodificano una volta sola; un errore su una riga viene segnalato e non ferma
+il file. Il BOM UTF-8 e il separatore del file originale vengono mantenuti.
+
 ## Struttura
 
 | Percorso | Contenuto |
@@ -63,7 +83,7 @@ decidere se fidarsi del risultato guarda la confidenza.
 | `sql/04_dbsn.sql` | dominio dei tipi di località DBSN e calcolo dell'importanza |
 | `scripts/osm_civici.sql` | estrazione dei civici da un import osm2pgsql (`--hstore`) |
 | `sql/import/*.sql` | trasformazione da staging alle tabelle definitive |
-| `bin/schema.php`, `bin/importa.php` | script da riga di comando |
+| `bin/schema.php`, `bin/importa.php`, `bin/geocodifica_csv.php` | script da riga di comando |
 | `src/` | importatore, analizzatore degli indirizzi, geocoder, API |
 | `public/index.php` | punto di ingresso HTTP |
 | `tests/` | test e dati di prova sintetici |
