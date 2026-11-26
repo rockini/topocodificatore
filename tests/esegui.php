@@ -15,6 +15,7 @@ require dirname(__DIR__) . '/src/bootstrap.php';
 use Topocodificatore\AnalizzatoreIndirizzo;
 use Topocodificatore\Api;
 use Topocodificatore\Configurazione;
+use Topocodificatore\GeocodificaCsv;
 use Topocodificatore\Import\Importatore;
 
 $falliti = 0;
@@ -58,6 +59,67 @@ $casi = [
 $analizzatore = new AnalizzatoreIndirizzo();
 foreach ($casi as $testo => $atteso) {
     verifica("analizza('$testo')", $atteso, $analizzatore->analizza($testo)->comeArray());
+}
+
+// --- Geocodifica di un CSV (con un geocoder finto) -------------------------------
+
+/** @param list<string> $colonne */
+function csvGeocodificato(string $csv, array $colonne, ?string $sep = null, bool $intestazione = true): array
+{
+    $chiamate = 0;
+    $finto = static function (string $indirizzo) use (&$chiamate): ?array {
+        $chiamate++;
+        if (stripos($indirizzo, 'errore') !== false) {
+            throw new RuntimeException('database non raggiungibile');
+        }
+        return stripos($indirizzo, 'roma') !== false
+            ? ['confidenza' => 0.83456, 'lat' => 41.9027835, 'lon' => 12.4963655]
+            : null;
+    };
+    $avvisi = [];
+    $in = fopen('php://temp', 'w+b');
+    fwrite($in, $csv);
+    rewind($in);
+    $out = fopen('php://temp', 'w+b');
+    $conteggio = (new GeocodificaCsv($finto, $colonne, $sep, $intestazione, ['confidenza', 'latitudine', 'longitudine'],
+        static function (string $m) use (&$avvisi): void {
+            $avvisi[] = $m;
+        }))->elabora($in, $out);
+    rewind($out);
+    return [stream_get_contents($out), $conteggio, $chiamate, $avvisi];
+}
+
+[$uscita, $conteggio, $chiamate] = csvGeocodificato(
+    "id;Indirizzo;note\n1;Via del Corso 1, Roma;\"a;b\"\n2;Via Inesistente, Nessuno;\n3;;vuoto\n4;via del corso 1, roma;\n",
+    ['indirizzo']
+);
+verifica('csv: colonne aggiunte e separatore riconosciuto', "id;Indirizzo;note;confidenza;latitudine;longitudine\n"
+    . "1;\"Via del Corso 1, Roma\";\"a;b\";0.835;41.9027835;12.4963655\n"
+    . "2;\"Via Inesistente, Nessuno\";;;;\n"
+    . "3;;vuoto;;;\n"
+    . "4;\"via del corso 1, roma\";;0.835;41.9027835;12.4963655\n", $uscita);
+verifica('csv: conteggio', ['righe' => 4, 'trovati' => 2, 'non_trovati' => 1, 'vuoti' => 1], $conteggio);
+verifica('csv: indirizzi ripetuti geocodificati una volta', 2, $chiamate);
+
+[$uscita] = csvGeocodificato("\xEF\xBB\xBFvia,civico,comune\nVia del Corso,1,Roma\n", ['via', 'civico', '3']);
+verifica('csv: più colonne, per nome e posizione, con BOM', "\xEF\xBB\xBFvia,civico,comune,confidenza,latitudine,longitudine\n"
+    . "\"Via del Corso\",1,Roma,0.835,41.9027835,12.4963655\n", $uscita);
+
+[$uscita] = csvGeocodificato("Via del Corso 1 Roma\tx\n", ['1'], "\t", false);
+verifica('csv: senza intestazione', "\"Via del Corso 1 Roma\"\tx\t0.835\t41.9027835\t12.4963655\n", $uscita);
+
+[$uscita] = csvGeocodificato("address,x\nRoma,1\n", []);
+verifica('csv: colonna riconosciuta dal nome', "address,x,confidenza,latitudine,longitudine\nRoma,1,0.835,41.9027835,12.4963655\n", $uscita);
+
+[$uscita, $conteggio, , $avvisi] = csvGeocodificato("indirizzo\nerrore Roma\nRoma\n", ['indirizzo']);
+verifica('csv: un errore non ferma il file', ["indirizzo,confidenza,latitudine,longitudine\n\"errore Roma\",,,\nRoma,0.835,41.9027835,12.4963655\n", 1],
+    [$uscita, count($avvisi)]);
+
+try {
+    csvGeocodificato("nome,citta\nx,y\n", ['indirizzo']);
+    verifica('csv: colonna mancante', 'eccezione', 'nessuna eccezione');
+} catch (RuntimeException $e) {
+    verifica('csv: colonna mancante', true, strpos($e->getMessage(), 'nome, citta') !== false);
 }
 
 // --- Database -------------------------------------------------------------------
@@ -204,6 +266,29 @@ if (!getenv('GEOCODER_TEST_DSN')) {
     verifica('geocodifica: probabilità che sommano a 1', 1.0, round(array_sum(array_column($candidati, 'probabilita')), 2));
     verifica('geocodifica: coordinate', true, isset($candidati[0]['lat'], $candidati[0]['lon']));
     verifica('geocodifica: niente', [], \Topocodificatore\geocodifica('  ', 5, $db));
+
+    // Lo script bin/geocodifica_csv.php sul database di prova.
+    $cartella = sys_get_temp_dir() . '/topocodificatore_' . getmypid();
+    @mkdir($cartella);
+    file_put_contents("$cartella/ingresso.csv", "id;indirizzo\n1;Via Garibaldi 13, Milano\n2;\n");
+    $comando = sprintf('%s %s %s %s --config=%s 2>&1', escapeshellarg(PHP_BINARY),
+        escapeshellarg(dirname(__DIR__) . '/bin/geocodifica_csv.php'), escapeshellarg("$cartella/ingresso.csv"),
+        escapeshellarg("$cartella/uscita.csv"), escapeshellarg(__DIR__ . '/config.test.php'));
+    exec($comando, $righeComando, $stato);
+    $righe = is_file("$cartella/uscita.csv") ? array_map(static function (string $r): array {
+        return str_getcsv($r, ';', '"', '');
+    }, file("$cartella/uscita.csv", FILE_IGNORE_NEW_LINES)) : [];
+    verifica('geocodifica_csv: esito', 0, $stato);
+    verifica('geocodifica_csv: intestazione', ['id', 'indirizzo', 'confidenza', 'latitudine', 'longitudine'], $righe[0] ?? null);
+    verifica('geocodifica_csv: coordinate del civico', ['45.48065', '9.187'], [
+        isset($righe[1][3]) ? (string) round((float) $righe[1][3], 5) : null,
+        isset($righe[1][4]) ? (string) round((float) $righe[1][4], 3) : null,
+    ]);
+    verifica('geocodifica_csv: confidenza tra 0 e 1', true, isset($righe[1][2]) && (float) $righe[1][2] > 0 && (float) $righe[1][2] <= 1);
+    verifica('geocodifica_csv: riga senza indirizzo', ['2', '', '', '', ''], $righe[2] ?? null);
+    @unlink("$cartella/ingresso.csv");
+    @unlink("$cartella/uscita.csv");
+    @rmdir($cartella);
 
     [$s] = $cerca([]);
     verifica('search senza parametri: 400', 400, $s);
